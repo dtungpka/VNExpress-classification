@@ -3,10 +3,6 @@
 ## Overview
 This repository contains a comprehensive text classification system for Vietnamese news articles from VNExpress. The project implements various natural language processing models and feature extraction techniques to categorize Vietnamese news content.
 
-## Author
-- **Author:** dtungpka
-- **GitHub:** [https://github.com/dtungpka](https://github.com/dtungpka)
-
 ## Features
 - Multiple text classification models:
   - Transformer-based architecture

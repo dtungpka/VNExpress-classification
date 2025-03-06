@@ -1,0 +1,77 @@
+{
+  "1": {
+    "code": "<POL>",
+    "name": "Politics",
+    "description": "Articles about domestic and international political events, government policies, and elections"
+  },
+  "2": {
+    "code": "<ECO>",
+    "name": "Economy",
+    "description": "Articles about business, finance, markets, and economic policies"
+  },
+  "3": {
+    "code": "<HEA>",
+    "name": "Health",
+    "description": "Articles about healthcare, medical research, diseases, and wellness"
+  },
+  "4": {
+    "code": "<EDU>",
+    "name": "Education",
+    "description": "Articles about education policies, schools, universities, and learning"
+  },
+  "5": {
+    "code": "<ENV>",
+    "name": "Environment",
+    "description": "Articles about climate change, conservation, pollution, and sustainability"
+  },
+  "6": {
+    "code": "<SOC>",
+    "name": "Society",
+    "description": "Articles about social issues, culture, lifestyle, and human interest stories"
+  },
+  "7": {
+    "code": "<TRA>",
+    "name": "Transport",
+    "description": "Articles about transportation, infrastructure, roads, and aviation"
+  },
+  "8": {
+    "code": "<TEC>",
+    "name": "Technology",
+    "description": "Articles about technology, innovation, gadgets, and digital trends"
+  },
+  "9": {
+    "code": "<ENT>",
+    "name": "Entertainment",
+    "description": "Articles about arts, culture, music, movies, and celebrity news"
+  },
+  "10": {
+    "code": "<SPR>",
+    "name": "Sports",
+    "description": "Articles about sports, athletes, teams, and sporting events"
+  },
+  "11": {
+    "code": "<FOO>",
+    "name": "Food",
+    "description": "Articles about food, restaurants, recipes, and culinary trends"
+  },
+  "12": {
+    "code": "<LAW>",
+    "name": "Law",
+    "description": "Articles about laws, regulations, court cases, and justice"
+  },
+  "13": {
+    "code": "<INT>",
+    "name": "International",
+    "description": "Articles about global news, international relations, and foreign affairs"
+  },
+  "14": {
+    "code": "<REG>",
+    "name": "Regional",
+    "description": "Articles about regional news, local events, and community issues"
+  },
+  "15": {
+    "code": "<SCI>",
+    "name": "Science",
+    "description": "Articles about scientific research, discoveries, and breakthroughs"
+  }
+}

@@ -32,6 +32,11 @@ from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from underthesea import word_tokenize
 
+from tensorflow.keras.callbacks import ModelCheckpoint, CSVLogger
+import elastic_weight_consolidation as ewc  
+import copy
+import numpy as np
+
 # Define argument parser
 def parse_args():
     parser = argparse.ArgumentParser(description='Author classification with multiple model architectures')
@@ -356,6 +361,185 @@ def build_lstm_model(input_shape, num_classes, args):
         metrics=["accuracy"]
     )
     return model
+def compute_fisher_matrix(model, dataset, sample_size=100):
+    """Compute Fisher Information Matrix for EWC implementation."""
+    fisher_matrix = {}
+    for param_name, param in model.trainable_weights:
+        fisher_matrix[param_name] = np.zeros(param.shape)
+    
+    # Sample from dataset
+    samples = dataset.take(sample_size)
+    
+    for batch in samples:
+        x, y = batch
+        with tf.GradientTape() as tape:
+            logits = model(x, training=True)
+            loss = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits(
+                    labels=tf.one_hot(y, depth=logits.shape[-1]), 
+                    logits=logits
+                )
+            )
+        
+        gradients = tape.gradient(loss, model.trainable_weights)
+        for idx, (param_name, _) in enumerate(model.trainable_weights):
+            fisher_matrix[param_name] += np.square(gradients[idx].numpy())
+    
+    # Normalize
+    for param_name in fisher_matrix:
+        fisher_matrix[param_name] /= sample_size
+    
+    return fisher_matrix
+
+class EWCLoss(keras.losses.Loss):
+    def __init__(self, old_model, fisher_matrix, lambda_param=0.4):
+        super(EWCLoss, self).__init__()
+        self.old_model = old_model
+        self.fisher_matrix = fisher_matrix
+        self.lambda_param = lambda_param
+        self.ce_loss = keras.losses.CategoricalCrossentropy()
+        
+    def call(self, y_true, y_pred):
+        # Standard cross-entropy loss
+        ce_loss = self.ce_loss(y_true, y_pred)
+        
+        # EWC loss (regularization term)
+        ewc_loss = 0
+        for idx, (weight, old_weight) in enumerate(zip(
+                self.model.trainable_weights, 
+                self.old_model.trainable_weights)):
+            fisher = self.fisher_matrix[weight.name]
+            ewc_loss += tf.reduce_sum(
+                fisher * tf.square(weight - old_weight)
+            )
+        
+        # Combine losses
+        total_loss = ce_loss + (self.lambda_param * ewc_loss)
+        return total_loss
+def train_continual_learning(args, initial_model, task_datasets, task_names):
+    """Train model using continual learning approach."""
+    models = []
+    histories = []
+    fisher_matrices = []
+    
+    current_model = initial_model
+    
+    # For each task (new set of categories)
+    for i, (task_name, (X_train, y_train, X_val, y_val)) in enumerate(zip(task_names, task_datasets)):
+        print(f"Learning task {i+1}: {task_name}")
+        
+        # First task is regular training
+        if i == 0:
+            history = current_model.fit(
+                X_train, y_train,
+                validation_data=(X_val, y_val),
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                callbacks=[
+                    EarlyStopping(patience=10),
+                    ModelCheckpoint(f'task_{i}_model.h5')
+                ]
+            )
+        else:
+            # Store old model weights
+            old_model = copy.deepcopy(current_model)
+            
+            # Compute Fisher Information Matrix
+            fisher_matrix = compute_fisher_matrix(
+                current_model, 
+                tf.data.Dataset.from_tensor_slices((X_train, y_train))
+                    .batch(args.batch_size)
+            )
+            
+            # Define EWC loss
+            ewc_loss = EWCLoss(old_model, fisher_matrix)
+            
+            # Compile model with EWC loss
+            current_model.compile(
+                optimizer='adam',
+                loss=ewc_loss,
+                metrics=['accuracy']
+            )
+            
+            # Train with EWC loss
+            history = current_model.fit(
+                X_train, y_train,
+                validation_data=(X_val, y_val),
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                callbacks=[
+                    EarlyStopping(patience=10),
+                    ModelCheckpoint(f'task_{i}_model.h5')
+                ]
+            )
+            
+            fisher_matrices.append(fisher_matrix)
+        
+        models.append(copy.deepcopy(current_model))
+        histories.append(history)
+        
+    return models, histories, fisher_matrices
+
+
+def prepare_memory_buffer(datasets, buffer_size=200):
+    """Create memory buffer for rehearsal."""
+    buffer_x = []
+    buffer_y = []
+    
+    for X, y in datasets:
+        # Randomly select samples for buffer
+        indices = np.random.choice(len(X), min(buffer_size, len(X)), replace=False)
+        buffer_x.append(X[indices])
+        buffer_y.append(y[indices])
+    
+    return np.vstack(buffer_x), np.vstack(buffer_y)
+
+def train_with_replay(model, new_X, new_y, buffer_X, buffer_y, args):
+    """Train using new data and replay buffer data."""
+    # Combine new data with buffer data
+    combined_X = np.vstack([new_X, buffer_X])
+    combined_y = np.vstack([new_y, buffer_y])
+    
+    # Shuffle combined data
+    indices = np.random.permutation(len(combined_X))
+    combined_X = combined_X[indices]
+    combined_y = combined_y[indices]
+    
+    # Train model
+    history = model.fit(
+        combined_X, combined_y,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        validation_split=0.2,
+        callbacks=[EarlyStopping(patience=5)]
+    )
+    
+    return model, history
+
+def evaluate_forgetting(models, task_datasets):
+    """Measure forgetting across tasks."""
+    n_tasks = len(task_datasets)
+    results = np.zeros((n_tasks, n_tasks))
+    
+    # Evaluate each model on each task
+    for i, model in enumerate(models):
+        for j, (X_test, y_test) in enumerate(task_datasets):
+            # Evaluate model i on task j
+            loss, acc = model.evaluate(X_test, y_test, verbose=0)
+            results[i, j] = acc
+    
+    # Calculate forgetting metrics
+    forgetting = []
+    for task_id in range(n_tasks-1):  # Can't calculate forgetting for the last task
+        best_acc = results[task_id, task_id]  # Accuracy right after learning the task
+        final_acc = results[-1, task_id]      # Accuracy at the end of all training
+        forgetting.append(best_acc - final_acc)
+    
+    return results, np.mean(forgetting)
+
+
+
+
 
 def build_bilstm_model(input_shape, num_classes, args):
     """Build a Bidirectional LSTM model."""
